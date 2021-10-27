@@ -37,6 +37,7 @@ class ajoutProduitVehicules extends Command
      */
     public function handle()
     {
+        dump("hello");
         $data['url']='https://www.tayara.tn/ads/c/V%C3%A9hicules/Voitures';
         $data['site']='tayara';
         $data['sous_category_id']=9;
