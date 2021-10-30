@@ -8,20 +8,12 @@ use App\Http\Controllers\gouvernorat\GouvernoratRepository;
 use App\Http\Controllers\marque\MarqueRepository;
 use App\Http\Controllers\modele\ModeleRepository;
 use App\Http\Controllers\newProduit\NewProduitRepository;
-use App\Http\Requests\ScrapingCreateRequest;
-use App\Mail\EvryMinuteMail;
-use App\Mail\NewData;
-use App\Mail\NewDataMail;
-use App\Models\Delegation;
-use App\Models\Gouvernorat;
 use App\Models\NewProduit;
 use App\Models\NewProduitImages;
-use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Mail;
-use JWTAuth;
-use Goutte\Client;
-use Illuminate\Support\Facades\Auth;
+use Symfony\Component\Filesystem\Filesystem;
+use Symfony\Component\Finder\Finder;
 use Symfony\Component\Panther\DomCrawler\Crawler;
+use \Symfony\Component\Panther\Client;
 
 class Scraping extends Controller
 {
@@ -30,19 +22,37 @@ class Scraping extends Controller
     protected $results = array();
     protected $url = array();
     protected $param = array();
-    protected $urlData=[];
+    protected $urlData = [];
     protected $path;
+    protected $client;
+    protected $replace;
+    protected $gouvernoratRepository;
+    protected $delegationRepository;
+    protected $newProduitRepository;
+    protected $data;
+    protected $option;
 
     public function __construct()
     {
-        $this->path="chromedriver/tools/chromedriver"; //windows
-       // $this->path="drivers/chromedriver"; // linux
+        //  $this->path="drivers/tools/chromedriver"; //windows
+        $this->path = "drivers/chromedriver"; // linux
 
-    }
+        $_SERVER['PANTHER_NO_HEADLESS'] = false;
+        $_SERVER['PANTHER_NO_SANDBOX'] = true;
+        $this->options = [
+            '--disable-gpu',
+             '--headless',
+              '--no-sandbox',
+            '--disable-dev-shm-usage',
+             '--window-size=1920,1080',
+            "port" => 9558,
+            "connection_timeout_in_ms" => 3600000,
+            "request_timeout_in_ms" => 3600000
+        ];
 
-    public function createProduit(array $data)
-    {
-        $replace = [
+        $this->client = Client::createChromeClient(base_path($this->path), null, $this->options);
+
+        $this->replace = [
             '&lt;' => '', '&gt;' => '', '&#039;' => '', '&amp;' => '',
             '&quot;' => '', 'À' => 'A', 'Á' => 'A', 'Â' => 'A', 'Ã' => 'A', 'Ä' => 'Ae',
             '&Auml;' => 'A', 'Å' => 'A', 'Ā' => 'A', 'Ą' => 'A', 'Ă' => 'A', 'Æ' => 'Ae',
@@ -89,435 +99,221 @@ class Scraping extends Controller
             'ш' => 'sh', 'щ' => 'sch', 'ъ' => '', 'ы' => 'y', 'ь' => '', 'э' => 'e',
             'ю' => 'yu', 'я' => 'ya'
         ];
+        $this->gouvernoratRepository = new GouvernoratRepository();
+        $this->delegationRepository = new DelegationRepository();
+        $this->newProduitRepository = new NewProduitRepository();
 
-        $gouvernoratRepository = new GouvernoratRepository();
-        $delegationRepository = new DelegationRepository();
-        $newProduitRepository = new NewProduitRepository();
+    }
 
-        $client = new Client();
-        $page = $client->request('GET', $data['url']);
-        $siteName = $data['site'];
-        if ($siteName = 'cava') {
-            $this->param['prix'] = intval($page->filter('.product-price')->filter('span')->last()->text());
-            $titre = $page->filter('.product-name')->text();
-            $this->param['titre'] = str_replace(array_keys($replace), $replace, $titre);
+    public function pageDom($url)
+    {
 
-            $description = $page->filter('.prod_description_content')->text();
-            $adresse = $page->filter('.product-location')->text();
-            $num = $page->filter('.phone_number')->filter('span')->text();
-            $this->param['description'] = $description . " Adresse: $adresse  Tel:$num";
-            $arrayAdresse = explode(',', $adresse);
-            $this->param['adresse'] = $adresse;
+        dump($url);
+        try {
+            $this->client->request('GET', $url);
 
-            $img = $page->filter('.product-image');
-            $this->url = [];
-            if (count($img) > 1) {
-                $img->each(function ($item) {
-                    $arrayUrl = explode("'", $item->attr('style'));
-                    $this->url[] = $arrayUrl[1];
+            $crawler = $this->client->waitFor('.price');
+            $crawler->filter('body > app-root > div > app-ad-detail > div')->each(function (Crawler $parentCrawler, $i) {
+                $priceCrawler = $parentCrawler->filter("body > app-root > div > app-ad-detail > div > div.ad-detail.container > div.ad-detail-content > div.ad-detail-content-information.mt-3 > div.priceFavorite > div.price");
+                $titreCrawler = $parentCrawler->filter("body > app-root > div > app-ad-detail > div > div.ad-detail.container > div.ad-detail-content > div.ad-detail-content-information.mt-3 > div.title");
+                $adresseCrawler = $parentCrawler->filter("body > app-root > div > app-ad-detail > div > div.ad-detail.container > div.ad-detail-content > div.ad-detail-content-information.mt-3 > div.location > span.info");
+                $telCrawler = $parentCrawler->filter("body > app-root > div > app-ad-detail > div > div.ad-detail.container > div.ad-detail-content > div.ad-detail-content-information.mt-3 > div.communication > div.phoneBtn > button.mat-focus-indicator.phone.d-lg-none.mat-flat-button.mat-button-base.ng-star-inserted > span.mat-button-wrapper > a.w-100");
+                $imgsCrawler = $parentCrawler->filter(".image.ratio.ng-star-inserted");
+                $paramsCrawler = $parentCrawler->filter(".params");
+                $descriptionCrawler = $parentCrawler->filter(".description.pt-5")->filter(".title");
+
+                $price = $priceCrawler->getText();
+                $this->param['prix'] = substr($price, 0, -3);
+                $titre = $titreCrawler->getText();
+                $this->param['titre'] = str_replace(array_keys($this->replace), $this->replace, $titre);
+
+                $description = $descriptionCrawler->getText();
+                $adresse = $adresseCrawler->getText();
+                $tel = $telCrawler->getAttribute('href');
+                $this->param['description'] = $description . " Adresse: $adresse  $tel";
+                $arrayAdresse = explode(',', $adresse);
+                $this->param['adresse'] = $adresse;
+
+                $this->url = [];
+                $imgsCrawler->each(function (Crawler $element, $i) {
+                    $this->url[] = $element->getAttribute('src');
                 });
-            } else {
-                $arrayUrl = explode("'", $img->attr('style'));
-                $this->url[] = $arrayUrl[1];
-            }
 
-            if (isset($arrayAdresse[1])) {
-                $gouv = $gouvernoratRepository->searchWithCriteria(['nomExacte' => trim(strtolower($arrayAdresse[1]))])->first();
-                if (!$gouv) {
-/*                    $key = 'New gouvernorat : delegation'. $arrayAdresse[0] .'gouvernorat';
-                    Mail::to("med.riadh.kh@gmail.com")->send(new NewDataMail($key,$arrayAdresse[1]));*/
-                    $gouv = false;
-                    $arrayAdresse[1] = '';
-                }
-
-            } else {
-                $gouv = false;
-                $arrayAdresse[1] = '';
-            }
-            if (isset($arrayAdresse[0])) {
-                $del = $delegationRepository->searchWithCriteria(['nomExacte' => trim(strtolower($arrayAdresse[0]))])->first();
-                if (!$del) {
-/*                    $key = 'New delegation : gouvernorat '. $arrayAdresse[1] .' delegation';
-                    Mail::to("med.riadh.kh@gmail.com")->send(new NewDataMail($key,$arrayAdresse[0]));*/
-                    $del = false;
-                    $arrayAdresse[0] = '';
-                }
-            } else {
-                $del = false;
-                $arrayAdresse[0] = '';
-            }
-
-            $params = $page->filter('.prod_filter_prop');
-            for ($i = 0; $i < $params->count(); $i++) {
-                if ($params->slice($i, 1)->filter('.prod_prop_name')->text() == 'Surface en m² :') {
-                    $this->param['superficie'] = $params->slice($i, 1)->filter('.prod_prop_value')->text();
-                }
-                if ($params->slice($i, 1)->filter('.prod_prop_name')->text() == 'Pièces :') {
-                    $this->param['chambres'] = $params->slice($i, 1)->filter('.prod_prop_value')->text();
-                }
-                if ($params->slice($i, 1)->filter('.prod_prop_name')->text() == 'Type transaction :') {
-                    $typeTransaction = $params->slice($i, 1)->filter('.prod_prop_value')->text();
-                    if ($typeTransaction == 'A Louer') {
-                        $typeTransaction = 'Louer';
-                    } else {
-                        $typeTransaction = 'Vendre';
+                if (isset($arrayAdresse[0])) {
+                    $gouv = $this->gouvernoratRepository->searchWithCriteria(['nomExacte' => trim(strtolower($arrayAdresse[0]))])->first();
+                    if (!$gouv) {
+                        $gouv = false;
                     }
-                    $this->param['typeTransaction'] = $typeTransaction;
+
+                } else {
+                    $gouv = false;
                 }
-                if ($params->slice($i, 1)->filter('.prod_prop_name')->text() == 'Marque de voiture :') {
-                    $marqueEtModele = $params->slice($i, 1)->filter('.prod_prop_value')->text();
-                    $marqueEtModeleArray = explode("(", $marqueEtModele);
-                    $marqueString = trim($marqueEtModeleArray[0]);
-                    $modeleString = mb_substr(trim($marqueEtModeleArray[1]), 0, -1);
+                if (isset($arrayAdresse[1])) {
+                    $del = $this->delegationRepository->searchWithCriteria(['nomExacte' => trim(strtolower($arrayAdresse[1]))])->first();
+                    if (!$del) {
+                        $del = false;
+                    }
+                } else {
+                    $del = false;
+                }
 
-                    if ($marqueString) {
 
+                $paramsCrawler->each(function (Crawler $paramCrawler, $i) {
+                    if ($paramCrawler->filter(".paramName")->getText() == 'Superficie') {
+                        $this->param['superficie'] = $paramCrawler->filter(".paramValue")->getText();
+                    }
+                    if ($paramCrawler->filter(".paramName")->getText() == 'Chambres') {
+                        $this->param['chambres'] = $paramCrawler->filter(".paramValue")->getText();
+                    }
+                    if ($paramCrawler->filter(".paramName")->getText() == 'Type de transaction') {
+                        $typeTransaction = $paramCrawler->filter(".paramValue")->getText();
+                        if ($typeTransaction == 'À Louer') {
+                            $typeTransaction = 'Louer';
+                        } else {
+                            $typeTransaction = 'Vendre';
+                        }
+                        $this->param['typeTransaction'] = $typeTransaction;
+                    }
+                    if ($paramCrawler->filter(".paramName")->getText() == 'Marque') {
+                        $marqueString = $paramCrawler->filter(".paramValue")->getText();
                         $marqueRep = new MarqueRepository();
                         $marque = $marqueRep->searchWithCriteria(['nomExacte' => strtolower($marqueString)])->first();
                         if ($marque) {
                             $this->param['marque_id'] = $marque['id'];
                         } else {
-/*                            $key = 'New marque : modele '. $modeleString .' marque';
-                            Mail::to("med.riadh.kh@gmail.com")->send(new NewDataMail($key,$marqueString));*/
                             $this->param['marque_id'] = 0;
                             $this->param['autre_marque'] = $marqueString;
                         }
                     }
-                    if ($modeleString) {
+                    if ($paramCrawler->filter(".paramName")->getText() == 'Modèle') {
+                        $modeleString = $paramCrawler->filter(".paramValue")->getText();
                         $ModelRep = new ModeleRepository();
                         $model = $ModelRep->searchWithCriteria(['nomExacte' => strtolower($modeleString)])->first();
                         if ($model) {
                             $this->param['modele_id'] = $model['id'];
                         } else {
-/*                            $key = 'New modele : model '. $marqueString .' modele';
-                            Mail::to("med.riadh.kh@gmail.com")->send(new NewDataMail($key,$modeleString));*/
                             $this->param['modele_id'] = 0;
                             $this->param['autre_modele'] = $modeleString;
                         }
-
                     }
-                }
-                if ($params->slice($i, 1)->filter('.prod_prop_name')->text() == 'Carburant :') {
-                    $this->param['carburant'] = $params->slice($i, 1)->filter('.prod_prop_value')->text();
-                }
-                if ($params->slice($i, 1)->filter('.prod_prop_name')->text() == 'Boîte de vitesse :') {
-                    $this->param['boite'] = $params->slice($i, 1)->filter('.prod_prop_value')->text();
-                }
-                if ($params->slice($i, 1)->filter('.prod_prop_name')->text() == 'Cylindrée :') {
-                    $this->param['cylindre'] = $params->slice($i, 1)->filter('.prod_prop_value')->text();
-                }
-                if ($params->slice($i, 1)->filter('.prod_prop_name')->text() == 'Puissance fiscale :') {
-                    $this->param['puissanceFiscale'] = $params->slice($i, 1)->filter('.prod_prop_value')->text();
-                }
-                if ($params->slice($i, 1)->filter('.prod_prop_name')->text() == 'Kilométrage :') {
-                    $this->param['kilometrage'] = $params->slice($i, 1)->filter('.prod_prop_value')->text();
-                }
-                if ($params->slice($i, 1)->filter('.prod_prop_name')->text() == 'Couleur :') {
-                    $this->param['couleur'] = $params->slice($i, 1)->filter('.prod_prop_value')->text();
-                }
-                if ($params->slice($i, 1)->filter('.prod_prop_name')->text() == 'Année :') {
-                    $this->param['annee'] = $params->slice($i, 1)->filter('.prod_prop_value')->text();
-                }
-            }
+                    if ($paramCrawler->filter(".paramName")->getText() == 'Carburant') {
+                        $this->param['carburant'] = $paramCrawler->filter(".paramValue")->getText();
+                    }
+                    if ($paramCrawler->filter(".paramName")->getText() == 'Boite') {
+                        $this->param['boite'] = $paramCrawler->filter(".paramValue")->getText();
+                    }
+                    if ($paramCrawler->filter(".paramName")->getText() == 'Cylindrée') {
+                        $this->param['cylindre'] = $paramCrawler->filter(".paramValue")->getText();
+                    }
+                    if ($paramCrawler->filter(".paramName")->getText() == 'Puissance fiscale') {
+                        $this->param['puissanceFiscale'] = $paramCrawler->filter(".paramValue")->getText();
+                    }
+                    if ($paramCrawler->filter(".paramName")->getText() == 'Kilométrage') {
+                        $this->param['kilometrage'] = $paramCrawler->filter(".paramValue")->getText();
+                    }
+                    if ($paramCrawler->filter(".paramName")->getText() == 'Couleur du véhicule') {
+                        $this->param['couleur'] = $paramCrawler->filter(".paramValue")->getText();
+                    }
+                    if ($paramCrawler->filter(".paramName")->getText() == 'Année') {
+                        $this->param['annee'] = $paramCrawler->filter(".paramValue")->getText();
+                    }
 
-        }
-        elseif ($siteName = 'tunisie-annonce') {
-            $this->param['prix'] = intval($page->filter('.product-price')->filter('span')->last()->text());
-            $titre = $page->filter('.product-name')->text();
-            $this->param['titre'] = str_replace(array_keys($replace), $replace, $titre);
-
-            $description = $page->filter('.prod_description_content')->text();
-            $adresse = $page->filter('.product-location')->text();
-            $num = $page->filter('.phone_number')->filter('span')->text();
-            $this->param['description'] = $description . " Adresse: $adresse  Tel:$num";
-            $arrayAdresse = explode(',', $adresse);
-            $this->param['adresse'] = $adresse;
-
-            $img = $page->filter('.product-image');
-            $this->url = [];
-            if (count($img) > 1) {
-                $img->each(function ($item) {
-                    $arrayUrl = explode("'", $item->attr('style'));
-                    $this->url[] = $arrayUrl[1];
                 });
-            } else {
-                $arrayUrl = explode("'", $img->attr('style'));
-                $this->url[] = $arrayUrl[1];
-            }
 
-            if (isset($arrayAdresse[1])) {
-                $gouv = $gouvernoratRepository->searchWithCriteria(['nomExacte' => trim(strtolower($arrayAdresse[1]))])->first();
-                if (!$gouv) {
-/*                    $key = 'New gouvernorat : delegation'. $arrayAdresse[0] .'gouvernorat';
-                    Mail::to("med.riadh.kh@gmail.com")->send(new NewDataMail($key,$arrayAdresse[1]));*/
-                    $gouv = false;
-                    $arrayAdresse[1] = '';
+
+                $this->param['etat'] = 2;
+                $this->param['category_id'] = intval($this->data['category_id']);
+                $this->param['sous_category_id'] = intval($this->data['sous_category_id']);
+
+
+                $this->param['quantite'] = 1;
+                $this->param['seuil_min'] = 1;
+                $this->param['prix_achat'] = 0;
+
+
+                $this->param['societe_id'] = 1;
+                $this->param['user_id'] = 5;
+
+                $this->param['image_name'] = $titre;
+                $this->param['image_path'] = $this->url[0];
+
+                if ($del) {
+                    $this->param['delegation_id'] = intval($del['id']);
+                } else {
+                    $this->param['delegation_id'] = 0;
+                    $this->param['autre_delegation'] = trim($arrayAdresse[1]);
+                }
+                if ($gouv) {
+                    $this->param['gouvernorat_id'] = intval($gouv['id']);
+                } else {
+                    $this->param['gouvernorat_id'] = 0;
+                    $this->param['autre_gouvernorat'] = trim($arrayAdresse[0]);
+
                 }
 
-            } else {
-                $gouv = false;
-                $arrayAdresse[1] = '';
-            }
-            if (isset($arrayAdresse[0])) {
-                $del = $delegationRepository->searchWithCriteria(['nomExacte' => trim(strtolower($arrayAdresse[0]))])->first();
-                if (!$del) {
-/*                    $key = 'New delegation : gouvernorat '. $arrayAdresse[1] .' delegation';
-                    Mail::to("med.riadh.kh@gmail.com")->send(new NewDataMail($key,$arrayAdresse[0]));*/
-                    $del = false;
-                    $arrayAdresse[0] = '';
-                }
-            } else {
-                $del = false;
-                $arrayAdresse[0] = '';
-            }
+                $resnewProduitsearch = $this->newProduitRepository->searchWithCriteriaSansFormat(['image_path' => $this->param['image_path']]);
+                if (count($resnewProduitsearch) == 0) {
+                    $res = NewProduit::create($this->param);
+                    $this->newProduitId = $res->id;
 
-            $params = $page->filter('.prod_filter_prop');
-            for ($i = 0; $i < $params->count(); $i++) {
-                if ($params->slice($i, 1)->filter('.prod_prop_name')->text() == 'Surface en m² :') {
-                    $this->param['superficie'] = $params->slice($i, 1)->filter('.prod_prop_value')->text();
-                }
-                if ($params->slice($i, 1)->filter('.prod_prop_name')->text() == 'Pièces :') {
-                    $this->param['chambres'] = $params->slice($i, 1)->filter('.prod_prop_value')->text();
-                }
-                if ($params->slice($i, 1)->filter('.prod_prop_name')->text() == 'Type transaction :') {
-                    $typeTransaction = $params->slice($i, 1)->filter('.prod_prop_value')->text();
-                    if ($typeTransaction == 'A Louer') {
-                        $typeTransaction = 'Louer';
-                    } else {
-                        $typeTransaction = 'Vendre';
-                    }
-                    $this->param['typeTransaction'] = $typeTransaction;
-                }
-                if ($params->slice($i, 1)->filter('.prod_prop_name')->text() == 'Marque de voiture :') {
-                    $marqueEtModele = $params->slice($i, 1)->filter('.prod_prop_value')->text();
-                    $marqueEtModeleArray = explode("(", $marqueEtModele);
-                    $marqueString = trim($marqueEtModeleArray[0]);
-                    $modeleString = mb_substr(trim($marqueEtModeleArray[1]), 0, -1);
-
-                    if ($marqueString) {
-
-                        $marqueRep = new MarqueRepository();
-                        $marque = $marqueRep->searchWithCriteria(['nomExacte' => strtolower($marqueString)])->first();
-                        if ($marque) {
-                            $this->param['marque_id'] = $marque['id'];
-                        } else {
-/*                            $key = 'New marque : modele '. $modeleString .' marque';
-                            Mail::to("med.riadh.kh@gmail.com")->send(new NewDataMail($key,$marqueString));*/
-                            $this->param['marque_id'] = 0;
-                            $this->param['autre_marque'] = $marqueString;
-                        }
-                    }
-                    if ($modeleString) {
-                        $ModelRep = new ModeleRepository();
-                        $model = $ModelRep->searchWithCriteria(['nomExacte' => strtolower($modeleString)])->first();
-                        if ($model) {
-                            $this->param['modele_id'] = $model['id'];
-                        } else {
-/*                            $key = 'New modele : model '. $marqueString .' modele';
-                            Mail::to("med.riadh.kh@gmail.com")->send(new NewDataMail($key,$modeleString));*/
-                            $this->param['modele_id'] = 0;
-                            $this->param['autre_modele'] = $modeleString;
-                        }
-
+                    foreach ($this->url as $item) {
+                        $paramImage['image_name'] = 'test';
+                        $paramImage['image_path'] = $item;
+                        $paramImage['new_produit_id'] = $this->newProduitId;
+                        NewProduitImages::create($paramImage);
                     }
                 }
-                if ($params->slice($i, 1)->filter('.prod_prop_name')->text() == 'Carburant :') {
-                    $this->param['carburant'] = $params->slice($i, 1)->filter('.prod_prop_value')->text();
-                }
-                if ($params->slice($i, 1)->filter('.prod_prop_name')->text() == 'Boîte de vitesse :') {
-                    $this->param['boite'] = $params->slice($i, 1)->filter('.prod_prop_value')->text();
-                }
-                if ($params->slice($i, 1)->filter('.prod_prop_name')->text() == 'Cylindrée :') {
-                    $this->param['cylindre'] = $params->slice($i, 1)->filter('.prod_prop_value')->text();
-                }
-                if ($params->slice($i, 1)->filter('.prod_prop_name')->text() == 'Puissance fiscale :') {
-                    $this->param['puissanceFiscale'] = $params->slice($i, 1)->filter('.prod_prop_value')->text();
-                }
-                if ($params->slice($i, 1)->filter('.prod_prop_name')->text() == 'Kilométrage :') {
-                    $this->param['kilometrage'] = $params->slice($i, 1)->filter('.prod_prop_value')->text();
-                }
-                if ($params->slice($i, 1)->filter('.prod_prop_name')->text() == 'Couleur :') {
-                    $this->param['couleur'] = $params->slice($i, 1)->filter('.prod_prop_value')->text();
-                }
-                if ($params->slice($i, 1)->filter('.prod_prop_name')->text() == 'Année :') {
-                    $this->param['annee'] = $params->slice($i, 1)->filter('.prod_prop_value')->text();
-                }
-            }
 
-        }
-        elseif ($siteName != 'cava') {
-            $prix = $page->filter('.price')->text();
-
-            $this->param['prix'] = substr($prix, 0, strlen($prix) - 3);
-            $this->param['titre'] = $page->filter('.title')->text();
-
-            $description = $page->filter('.title')->last()->filter('p')->text();
-            $adresse = $page->filter('.info')->text();
-            $num = $page->filter('.d-lg-block')->text();
-            $this->param['description'] = $description . " Adresse: $adresse  Tel:$num";
-
-            $arrayAdresse = explode(',', $adresse);
-            $this->param['adresse'] = $adresse;
-
-            $params = $page->filter('.params');
-            $params->each(function ($item) {
-                if ($item->filter('.paramName')->text() == 'Kilométrage') {
-                    $this->param['kilometrage'] = $item->filter('.paramValue')->text();
-                }
-                if ($item->filter('.paramName')->text() == 'Couleur du véhicule') {
-                    $this->param['couleur'] = $item->filter('.paramValue')->text();
-                }
-                if ($item->filter('.paramName')->text() == 'Etat du véhicule') {
-                    $this->param['etat_produit'] = $item->filter('.paramValue')->text();
-                }
-                if ($item->filter('.paramName')->text() == 'Boite') {
-                    $this->param['boite'] = $item->filter('.paramValue')->text();
-                }
-                if ($item->filter('.paramName')->text() == 'Année') {
-                    $this->param['annee'] = $item->filter('.paramValue')->text();
-                }
-                if ($item->filter('.paramName')->text() == 'Cylindrée') {
-                    $this->param['cylindre'] = $item->filter('.paramValue')->text();
-                }
-                if ($item->filter('.paramName')->text() == 'Marque') {
-
-                    $marqueRep = new MarqueRepository();
-                    $marque = $marqueRep->searchWithCriteria(['nomExacte' => strtolower($item->filter('.paramValue')->text())])->first();
-                    if ($marque) {
-                        $this->param['marque_id'] = $marque['id'];
-                    } else {
-                        $this->param['marque_id'] = 0;
-                        $this->param['autre_marque'] = trim($item->filter('.paramValue')->text());
-                    }
-                }
-                if ($item->filter('.paramName')->text() == 'Modèle') {
-                    $ModelRep = new ModeleRepository();
-                    $model = $ModelRep->searchWithCriteria(['nomExacte' => strtolower($item->filter('.paramValue')->text())])->first();
-                    if ($model) {
-                        $this->param['modele_id'] = $model['id'];
-                    } else {
-                        $this->param['modele_id'] = 0;
-                        $this->param['autre_modele'] = trim($item->filter('.paramValue')->text());
-                    }
-
-                }
-                if ($item->filter('.paramName')->text() == 'Puissance fiscale') {
-                    $this->param['puissanceFiscale'] = $item->filter('.paramValue')->text();
-                }
-                if ($item->filter('.paramName')->text() == 'Type de carrosserie') {
-                    $this->param['typeCarrosserie'] = $item->filter('.paramValue')->text();
-                }
-                if ($item->filter('.paramName')->text() == 'Carburant') {
-                    $this->param['carburant'] = $item->filter('.paramValue')->text();
-                }
             });
+        } catch (\Exception $ex) {
+            dump("Error: " . $ex->getMessage());
+            $this->client = Client::createChromeClient(base_path($this->path), null, $this->options);
 
-
-            $img = $page->filter('.carousel-slide .ng-star-inserted');
-
-            $img->each(function ($item) {
-                $oldurl = $item->attr('style');
-                $firstPart = substr($oldurl, 162);
-                if (!$firstPart) {
-                    $firstPart = mb_substr($oldurl, 80);
-                }
-                $secondPart = substr($firstPart, 0, strlen($firstPart) - 3);
-                $this->url[] = "https://storage.googleapis.com/tayara-migration-yams-pro/" . $secondPart;
-            });
-
-
-            if (isset($arrayAdresse[0])) {
-                $gouv = $gouvernoratRepository->searchWithCriteria(['nomExacte' => trim(strtolower($arrayAdresse[0]))])->first();
-            }
-            if (isset($arrayAdresse[1])) {
-                $del = $delegationRepository->searchWithCriteria(['nomExacte' => trim(strtolower($arrayAdresse[1]))])->first();
-            }
-
-
+            //$this->pageDom($url);
+        } finally {
         }
-
-
-//***********
-
-        $this->param['etat'] = 2;
-        $this->param['category_id'] = intval($data['category_id']);
-        $this->param['sous_category_id'] = intval($data['sous_category_id']);
-
-
-        $this->param['quantite'] = 1;
-        $this->param['seuil_min'] = 1;
-        $this->param['prix_achat'] = 0;
-
-
-        $this->param['societe_id'] = 1;
-        $this->param['user_id'] = 5;
-
-        $this->param['image_name'] = "test";
-        $this->param['image_path'] = $this->url[0];
-
-        if ($del) {
-            $this->param['delegation_id'] = intval($del['id']);
-        } else {
-            $this->param['delegation_id'] = 0;
-            $this->param['autre_delegation'] = trim($arrayAdresse[1]);
-        }
-        if ($gouv) {
-            $this->param['gouvernorat_id'] = intval($gouv['id']);
-        } else {
-            $this->param['gouvernorat_id'] = 0;
-            $this->param['autre_gouvernorat'] = trim($arrayAdresse[0]);
-
-        }
-
-        $resnewProduitsearch = $newProduitRepository->searchWithCriteriaSansFormat(['image_path' => $this->param['image_path']]);
-        if (count($resnewProduitsearch) == 0) {
-            $res = NewProduit::create($this->param);
-            $this->newProduitId = $res->id;
-
-            foreach ($this->url as $item) {
-                $paramImage['image_name'] = 'test';
-                $paramImage['image_path'] = $item;
-                $paramImage['new_produit_id'] = $this->newProduitId;
-                NewProduitImages::create($paramImage);
-            }
-        }
-        return 1;
 
     }
 
     public function addAlldataFromTayara(array $data)
     {
+        $this->data = $data;
         set_time_limit(0);
-        $url='https://www.tayara.tn/ads/get/Voitures/617720196b7e09c5ba6e88c3/Polo%20sedan';
+        $url = 'https://www.tayara.tn/ads/get/Stocks%20et%20Vente%20en%20gros/617a79df17c540474889b6ef/%C3%89cran%20Afficheur%20Iphone%20Samsung%20Huawei%20Original%2028000961';
         $this->pageDom($url);
 
         $urls = $this->globaleDom($data['url']);
+        while ($urls == null) {
+            $urls = $this->globaleDom($data['url']);
+        }
+
+        dump("here");
+        dump($urls);
         dump(count($urls));
         foreach ($urls as $key => $url) {
             dump($key);
             $this->pageDom($url);
         }
 
+        $this->client->quit();
+        // after all remove all the temporary files if any
+        $finder = (new Finder())
+            ->directories()
+            ->name('.com.google.Chrome.*')
+            ->ignoreDotFiles(false)
+            ->depth('== 0')
+            ->in('/tmp');
+        (new Filesystem())->remove($finder);
+
     }
+
     public function globaleDom($parentUrl)
     {
         try {
-            $_SERVER['PANTHER_NO_HEADLESS'] = false;
-            $_SERVER['PANTHER_NO_SANDBOX'] = true;
-            $options = [
-                '--disable-gpu',
-                '--headless',
-                '--no-sandbox',
-                '--window-size=1920,1080',
-                "port" => 9558,
-                "connection_timeout_in_ms" => 300000,
-                "request_timeout_in_ms" => 300000
-            ];
-            $parentClient = \Symfony\Component\Panther\Client::createChromeClient(base_path($this->path), null, $options);
+            dump($parentUrl);
+            $this->client->request('GET', $parentUrl);
 
-            $parentClient->request('GET', $parentUrl);
-
-            $parentCrawler = $parentClient->waitFor('.ng-star-inserted');
+            $parentCrawler = $this->client->waitFor('.ng-star-inserted');
             $produits = $parentCrawler->filter('a');
             $produits->each(function (Crawler $produit) {
                 $adsUrl = $produit->getAttribute('href');
@@ -525,84 +321,20 @@ class Scraping extends Controller
                     $this->urlData[] = 'https://www.tayara.tn' . $adsUrl;
                 }
             });
-            $parentClient->quit();
-            if (count($this->urlData)===0){
-                $this->globaleDom();
-            }else{
+            if (count($this->urlData) === 0 || $this->urlData == null) {
+                $this->globaleDom($parentUrl);
+            } else {
                 return $this->urlData;
             }
 
         } catch (\Exception $ex) {
+            //$this->globaleDom($parentUrl);
             dump("Error: " . $ex->getMessage());
-            $parentClient->quit();
-            $this->globaleDom();
+            $this->client = Client::createChromeClient(base_path($this->path), null, $this->options);
+
         } finally {
-            $parentClient->quit();
         }
     }
 
-    public function pageDom($url)
-    {
-        dump($url);
-        try {
-            $_SERVER['PANTHER_NO_HEADLESS'] = false;
-            $_SERVER['PANTHER_NO_SANDBOX'] = true;
-            $options = [
-                '--disable-gpu',
-                '--headless',
-                '--no-sandbox',
-                '--window-size=1920,1080',
-                "port" => 9558,
-                "connection_timeout_in_ms" => 300000,
-                "request_timeout_in_ms" => 300000
-            ];
-
-            $client = \Symfony\Component\Panther\Client::createChromeClient(base_path($this->path), null, $options);
-            $client->request('GET', $url);
-
-            $crawler = $client->waitFor('.price');
-            $crawler->filter('body > app-root > div > app-ad-detail > div')->each(function (Crawler $parentCrawler, $i) {
-                $priceCrawler =$parentCrawler->filter("body > app-root > div > app-ad-detail > div > div.ad-detail.container > div.ad-detail-content > div.ad-detail-content-information.mt-3 > div.priceFavorite > div.price");
-                $titreCrawler =$parentCrawler->filter("body > app-root > div > app-ad-detail > div > div.ad-detail.container > div.ad-detail-content > div.ad-detail-content-information.mt-3 > div.title");
-                $adresseCrawler =$parentCrawler->filter("body > app-root > div > app-ad-detail > div > div.ad-detail.container > div.ad-detail-content > div.ad-detail-content-information.mt-3 > div.location > span.info");
-                $categoryCrawler =$parentCrawler->filter("body > app-root > div > app-ad-detail > div > div.ad-detail.container > div.ad-detail-content > div.ad-detail-content-information.mt-3 > div.category > span.info");
-                $nameCrawler =$parentCrawler->filter("body > app-root > div > app-ad-detail > div > div.ad-detail.container > div.ad-detail-content > div.ad-detail-content-information.mt-3 > div.userInformation > div.user-info > span.name > p");
-                $telCrawler =$parentCrawler->filter("body > app-root > div > app-ad-detail > div > div.ad-detail.container > div.ad-detail-content > div.ad-detail-content-information.mt-3 > div.communication > div.phoneBtn > button.mat-focus-indicator.phone.d-lg-none.mat-flat-button.mat-button-base.ng-star-inserted > span.mat-button-wrapper > a.w-100");
-                $imgsCrawler =$parentCrawler->filter("body > app-root > div > app-ad-detail > div > div.ad-detail.container > div.ad-detail-content > div.image > ng-image-slider > div > div > div > div > div:nth-child(2) > custom-img > div > img");
-                $imgsCrawler = $parentCrawler->filter(".image.ratio.ng-star-inserted");
-                $imgUrl=[];
-                $imgsCrawler->each(function (Crawler $element, $i) {
-                    dump($element->getAttribute('src'));
-
-                });
-                $paramsCrawler = $parentCrawler->filter(".params");
-                $paramsCrawler->each(function (Crawler $paramCrawler, $i) {
-                    dump($paramCrawler->filter(".paramName")->getText());
-                    dump($paramCrawler->filter(".paramValue")->getText());
-                });
-
-                $price = $priceCrawler->getText();
-                $titre = $titreCrawler->getText();
-                $adresse = $adresseCrawler->getText();
-                $category = $categoryCrawler->getText();
-                $name = $nameCrawler->getText();
-                $tel = $telCrawler->getAttribute('href');
-                dump($price);
-                dump($titre);
-                dump($adresse);
-                dump($category);
-                dump($name);
-                dump($tel);
-            });
-            $client->quit();
-        } catch (\Exception $ex) {
-            dump("Error: " . $ex->getMessage());
-            $client->quit();
-            $this->pageDom($url);
-        } finally {
-            $client->quit();
-        }
-
-    }
 
 }
