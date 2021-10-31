@@ -3,8 +3,6 @@
 namespace App\Console\Commands;
 
 use Illuminate\Console\Command;
-use Symfony\Component\Filesystem\Filesystem;
-use Symfony\Component\Finder\Finder;
 
 class ajoutProduitVehicules extends Command
 {
@@ -39,14 +37,6 @@ class ajoutProduitVehicules extends Command
      */
     public function handle()
     {
-        $finder = (new Finder())
-            ->directories()
-            ->name('.com.google.Chrome.*')
-            ->ignoreDotFiles(false)
-            ->depth('== 0')
-            ->in('/tmp');
-        (new Filesystem())->remove($finder);
-
         //vehicules
         $data['url']='https://www.tayara.tn/ads/c/V%C3%A9hicules/Voitures';
         $data['site']='tayara';

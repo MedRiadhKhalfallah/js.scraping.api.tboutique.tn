@@ -10,6 +10,7 @@ use App\Http\Controllers\modele\ModeleRepository;
 use App\Http\Controllers\newProduit\NewProduitRepository;
 use App\Models\NewProduit;
 use App\Models\NewProduitImages;
+use Illuminate\Support\Facades\Http;
 use Symfony\Component\Filesystem\Filesystem;
 use Symfony\Component\Finder\Finder;
 use Symfony\Component\Panther\DomCrawler\Crawler;
@@ -34,8 +35,8 @@ class Scraping extends Controller
 
     public function __construct()
     {
-        //  $this->path="drivers/tools/chromedriver"; //windows
-        $this->path = "drivers/chromedriver"; // linux
+          $this->path="drivers/tools/chromedriver"; //windows
+       // $this->path = "drivers/chromedriver"; // linux
 
         $_SERVER['PANTHER_NO_HEADLESS'] = false;
         $_SERVER['PANTHER_NO_SANDBOX'] = true;
@@ -99,19 +100,14 @@ class Scraping extends Controller
             'ш' => 'sh', 'щ' => 'sch', 'ъ' => '', 'ы' => 'y', 'ь' => '', 'э' => 'e',
             'ю' => 'yu', 'я' => 'ya'
         ];
-        $this->gouvernoratRepository = new GouvernoratRepository();
-        $this->delegationRepository = new DelegationRepository();
-        $this->newProduitRepository = new NewProduitRepository();
 
     }
 
     public function pageDom($url)
     {
-
         dump($url);
         try {
             $this->client->request('GET', $url);
-
             $crawler = $this->client->waitFor('.price');
             $crawler->filter('body > app-root > div > app-ad-detail > div')->each(function (Crawler $parentCrawler, $i) {
                 $priceCrawler = $parentCrawler->filter("body > app-root > div > app-ad-detail > div > div.ad-detail.container > div.ad-detail-content > div.ad-detail-content-information.mt-3 > div.priceFavorite > div.price");
@@ -138,24 +134,8 @@ class Scraping extends Controller
                 $imgsCrawler->each(function (Crawler $element, $i) {
                     $this->url[] = $element->getAttribute('src');
                 });
-
-                if (isset($arrayAdresse[0])) {
-                    $gouv = $this->gouvernoratRepository->searchWithCriteria(['nomExacte' => trim(strtolower($arrayAdresse[0]))])->first();
-                    if (!$gouv) {
-                        $gouv = false;
-                    }
-
-                } else {
-                    $gouv = false;
-                }
-                if (isset($arrayAdresse[1])) {
-                    $del = $this->delegationRepository->searchWithCriteria(['nomExacte' => trim(strtolower($arrayAdresse[1]))])->first();
-                    if (!$del) {
-                        $del = false;
-                    }
-                } else {
-                    $del = false;
-                }
+                $this->param['gouvernorat']=$arrayAdresse[0];
+                $this->param['delegation']=$arrayAdresse[1];
 
 
                 $paramsCrawler->each(function (Crawler $paramCrawler, $i) {
@@ -175,27 +155,12 @@ class Scraping extends Controller
                         $this->param['typeTransaction'] = $typeTransaction;
                     }
                     if ($paramCrawler->filter(".paramName")->getText() == 'Marque') {
-                        $marqueString = $paramCrawler->filter(".paramValue")->getText();
-                        $marqueRep = new MarqueRepository();
-                        $marque = $marqueRep->searchWithCriteria(['nomExacte' => strtolower($marqueString)])->first();
-                        if ($marque) {
-                            $this->param['marque_id'] = $marque['id'];
-                        } else {
-                            $this->param['marque_id'] = 0;
-                            $this->param['autre_marque'] = $marqueString;
-                        }
+                        $this->param['marque'] = $paramCrawler->filter(".paramValue")->getText();
                     }
                     if ($paramCrawler->filter(".paramName")->getText() == 'Modèle') {
-                        $modeleString = $paramCrawler->filter(".paramValue")->getText();
-                        $ModelRep = new ModeleRepository();
-                        $model = $ModelRep->searchWithCriteria(['nomExacte' => strtolower($modeleString)])->first();
-                        if ($model) {
-                            $this->param['modele_id'] = $model['id'];
-                        } else {
-                            $this->param['modele_id'] = 0;
-                            $this->param['autre_modele'] = $modeleString;
-                        }
+                        $this->param['modele'] = $paramCrawler->filter(".paramValue")->getText();
                     }
+
                     if ($paramCrawler->filter(".paramName")->getText() == 'Carburant') {
                         $this->param['carburant'] = $paramCrawler->filter(".paramValue")->getText();
                     }
@@ -237,33 +202,10 @@ class Scraping extends Controller
                 $this->param['image_name'] = $titre;
                 $this->param['image_path'] = $this->url[0];
 
-                if ($del) {
-                    $this->param['delegation_id'] = intval($del['id']);
-                } else {
-                    $this->param['delegation_id'] = 0;
-                    $this->param['autre_delegation'] = trim($arrayAdresse[1]);
-                }
-                if ($gouv) {
-                    $this->param['gouvernorat_id'] = intval($gouv['id']);
-                } else {
-                    $this->param['gouvernorat_id'] = 0;
-                    $this->param['autre_gouvernorat'] = trim($arrayAdresse[0]);
+                $this->param['imageUrls']=$this->url;
 
-                }
 
-                $resnewProduitsearch = $this->newProduitRepository->searchWithCriteriaSansFormat(['image_path' => $this->param['image_path']]);
-                if (count($resnewProduitsearch) == 0) {
-                    $res = NewProduit::create($this->param);
-                    $this->newProduitId = $res->id;
-
-                    foreach ($this->url as $item) {
-                        $paramImage['image_name'] = 'test';
-                        $paramImage['image_path'] = $item;
-                        $paramImage['new_produit_id'] = $this->newProduitId;
-                        NewProduitImages::create($paramImage);
-                    }
-                }
-
+                Http::post('http://api.tboutique.tn/api/addNewProduitTayara', $this->param);
             });
         } catch (\Exception $ex) {
             dump("Error: " . $ex->getMessage());
@@ -279,13 +221,10 @@ class Scraping extends Controller
     {
         $this->data = $data;
         set_time_limit(0);
-        $url = 'https://www.tayara.tn/ads/get/Stocks%20et%20Vente%20en%20gros/617a79df17c540474889b6ef/%C3%89cran%20Afficheur%20Iphone%20Samsung%20Huawei%20Original%2028000961';
+        $url = 'https://www.tayara.tn/ads/get/Voitures/617ea9919273c5f7751c0212/polo%206%20confort_line';
         $this->pageDom($url);
-
+die;
         $urls = $this->globaleDom($data['url']);
-        while ($urls == null) {
-            $urls = $this->globaleDom($data['url']);
-        }
 
         dump("here");
         dump($urls);
