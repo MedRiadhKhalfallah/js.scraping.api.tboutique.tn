@@ -46,7 +46,7 @@ class Scraping extends Controller
               '--no-sandbox',
             '--disable-dev-shm-usage',
              '--window-size=1920,1080',
-            "port" => 9558,
+     //       "port" => 9558,
             "connection_timeout_in_ms" => 3600000,
             "request_timeout_in_ms" => 3600000
         ];
