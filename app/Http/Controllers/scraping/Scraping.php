@@ -35,17 +35,17 @@ class Scraping extends Controller
 
     public function __construct()
     {
-          $this->path="drivers/tools/chromedriver"; //windows
-       // $this->path = "drivers/chromedriver"; // linux
+        $this->path = "drivers/tools/chromedriver"; //windows
+        // $this->path = "drivers/chromedriver"; // linux
 
         $_SERVER['PANTHER_NO_HEADLESS'] = false;
         $_SERVER['PANTHER_NO_SANDBOX'] = true;
         $this->options = [
             '--disable-gpu',
-             '--headless',
-              '--no-sandbox',
+            '--headless',
+            '--no-sandbox',
             '--disable-dev-shm-usage',
-             '--window-size=1920,1080',
+            '--window-size=1920,1080',
             "port" => 9558,
             "connection_timeout_in_ms" => 3600000,
             "request_timeout_in_ms" => 3600000
@@ -109,7 +109,7 @@ class Scraping extends Controller
         try {
             $this->client->request('GET', $url);
             $crawler = $this->client->waitFor('.price');
-            $this->param=[];
+            $this->param = [];
             $crawler->filter('body > app-root > div > app-ad-detail > div')->each(function (Crawler $parentCrawler, $i) {
                 $priceCrawler = $parentCrawler->filter("body > app-root > div > app-ad-detail > div > div.ad-detail.container > div.ad-detail-content > div.ad-detail-content-information.mt-3 > div.priceFavorite > div.price");
                 $titreCrawler = $parentCrawler->filter("body > app-root > div > app-ad-detail > div > div.ad-detail.container > div.ad-detail-content > div.ad-detail-content-information.mt-3 > div.title");
@@ -135,9 +135,8 @@ class Scraping extends Controller
                 $imgsCrawler->each(function (Crawler $element, $i) {
                     $this->url[] = $element->getAttribute('src');
                 });
-                $this->param['gouvernorat']=$arrayAdresse[0];
-                $this->param['delegation']=$arrayAdresse[1];
-
+                $this->param['gouvernorat'] = $this->getGouvernorat($arrayAdresse[0]);
+                $this->param['delegation'] = $this->getDelegation($arrayAdresse[1]);
 
                 $paramsCrawler->each(function (Crawler $paramCrawler, $i) {
                     if ($paramCrawler->filter(".paramName")->getText() == 'Superficie') {
@@ -203,7 +202,7 @@ class Scraping extends Controller
                 $this->param['image_name'] = $titre;
                 $this->param['image_path'] = $this->url[0];
 
-                $this->param['imageUrls']=$this->url;
+                $this->param['imageUrls'] = $this->url;
 
 
                 Http::post('http://api.tboutique.tn/api/addNewProduitTayara', $this->param);
@@ -224,7 +223,7 @@ class Scraping extends Controller
         set_time_limit(0);
         $url = 'https://www.tayara.tn/ads/get/Voitures/617ea9919273c5f7751c0212/polo%206%20confort_line';
         $this->pageDom($url);
-die;
+        die;
         $urls = $this->globaleDom($data['url']);
 
         dump("here");
@@ -276,5 +275,66 @@ die;
         }
     }
 
+    public function getGouvernorat($gouvernorat)
+    {
+        switch ($gouvernorat) {
+            case 'Médenine':
+                return 'médenine ville';
+                break;
+            default:
+                return $gouvernorat;
+        }
+
+    }
+    public function getDelegation($delegation)
+    {
+        switch ($delegation) {
+            case 'Médenine':
+                return 'médenine ville';
+                break;
+            case 'L Aouina':
+                return "laouina";
+                break;
+            case 'Boumhel':
+                return "boumhal";
+                break;
+            case 'Autres Villes':
+                return "autre";
+                break;
+            case 'Centre Ville Lafayette':
+                return "lafayette";
+                break;
+            case 'Medina Jedida':
+                return "nouvelle medina";
+                break;
+            case 'M Saken':
+                return "msaken";
+                break;
+            case 'Kef Ouest':
+                return "le kef ouest";
+                break;
+            case 'La Manouba':
+                return "mannouba";
+                break;
+            case 'Sfax':
+                return "sfax ville";
+                break;
+            case 'Ariana':
+                return "ariana ville";
+                break;
+            case 'Tunis':
+                return "tunis medina";
+                break;
+            case 'Sousse':
+                return "sousse ville";
+                break;
+            case 'Menzah':
+                return "el menzah";
+                break;
+            default:
+                return $delegation;
+        }
+
+    }
 
 }
