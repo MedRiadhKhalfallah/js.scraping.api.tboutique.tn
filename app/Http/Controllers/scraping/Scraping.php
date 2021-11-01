@@ -45,8 +45,8 @@ class Scraping extends Controller
             '--headless',
             '--no-sandbox',
             '--disable-dev-shm-usage',
-            '--window-size=1920,1080',
-            "port" => 9558,
+             '--window-size=1920,1080',
+     //       "port" => 9558,
             "connection_timeout_in_ms" => 3600000,
             "request_timeout_in_ms" => 3600000
         ];
@@ -209,8 +209,6 @@ class Scraping extends Controller
             });
         } catch (\Exception $ex) {
             dump("Error: " . $ex->getMessage());
-            $this->client = Client::createChromeClient(base_path($this->path), null, $this->options);
-
             //$this->pageDom($url);
         } finally {
         }
@@ -221,29 +219,13 @@ class Scraping extends Controller
     {
         $this->data = $data;
         set_time_limit(0);
-        $url = 'https://www.tayara.tn/ads/get/Voitures/617ea9919273c5f7751c0212/polo%206%20confort_line';
+        $url = 'https://www.tayara.tn/ads/get/Voitures/617befec9273c5f7751bf498/Ford%20fiesta%20';
         $this->pageDom($url);
-        die;
         $urls = $this->globaleDom($data['url']);
-
-        dump("here");
-        dump($urls);
-        dump(count($urls));
         foreach ($urls as $key => $url) {
             dump($key);
             $this->pageDom($url);
         }
-
-        $this->client->quit();
-        // after all remove all the temporary files if any
-        $finder = (new Finder())
-            ->directories()
-            ->name('.com.google.Chrome.*')
-            ->ignoreDotFiles(false)
-            ->depth('== 0')
-            ->in('/tmp');
-        (new Filesystem())->remove($finder);
-
     }
 
     public function globaleDom($parentUrl)
@@ -269,8 +251,6 @@ class Scraping extends Controller
         } catch (\Exception $ex) {
             //$this->globaleDom($parentUrl);
             dump("Error: " . $ex->getMessage());
-            $this->client = Client::createChromeClient(base_path($this->path), null, $this->options);
-
         } finally {
         }
     }
