@@ -209,8 +209,6 @@ class Scraping extends Controller
             });
         } catch (\Exception $ex) {
             dump("Error: " . $ex->getMessage());
-            $this->client = Client::createChromeClient(base_path($this->path), null, $this->options);
-
             //$this->pageDom($url);
         } finally {
         }
@@ -229,8 +227,6 @@ class Scraping extends Controller
             dump($key);
             $this->pageDom($url);
         }
-
-        $this->client->quit();
     }
 
     public function globaleDom($parentUrl)
@@ -256,8 +252,6 @@ class Scraping extends Controller
         } catch (\Exception $ex) {
             //$this->globaleDom($parentUrl);
             dump("Error: " . $ex->getMessage());
-            $this->client = Client::createChromeClient(base_path($this->path), null, $this->options);
-
         } finally {
         }
     }
