@@ -44,7 +44,7 @@ class ajoutProduitVehicules extends Command
         $data['url']='https://www.tayara.tn/ads/c/V%C3%A9hicules/Voitures';
         $data['sous_category_id']=9;
         $data['category_id']=2;
-        //$sc->addAlldataFromTayara($data);
+        $sc->addAlldataFromTayara($data);
 
         $data['url']='https://www.tayara.tn/ads/c/V%C3%A9hicules/Motos';
         $data['sous_category_id']=10;

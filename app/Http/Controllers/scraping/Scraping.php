@@ -232,6 +232,7 @@ class Scraping extends Controller
     {
         try {
             dump($parentUrl);
+            $this->urlData=[];
             $this->client->request('GET', $parentUrl);
 
             $parentCrawler = $this->client->waitFor('.ng-star-inserted');
