@@ -3,23 +3,13 @@
 namespace App\Http\Controllers\scraping;
 
 use App\Http\Controllers\Controller;
-use App\Http\Controllers\delegation\DelegationRepository;
-use App\Http\Controllers\gouvernorat\GouvernoratRepository;
-use App\Http\Controllers\marque\MarqueRepository;
-use App\Http\Controllers\modele\ModeleRepository;
-use App\Http\Controllers\newProduit\NewProduitRepository;
-use App\Models\NewProduit;
-use App\Models\NewProduitImages;
 use Illuminate\Support\Facades\Http;
-use Symfony\Component\Filesystem\Filesystem;
-use Symfony\Component\Finder\Finder;
 use Symfony\Component\Panther\DomCrawler\Crawler;
 use \Symfony\Component\Panther\Client;
 
 class Scraping extends Controller
 {
     protected $user;
-    protected $newProduitId;
     protected $results = array();
     protected $url = array();
     protected $param = array();
@@ -27,9 +17,6 @@ class Scraping extends Controller
     protected $path;
     protected $client;
     protected $replace;
-    protected $gouvernoratRepository;
-    protected $delegationRepository;
-    protected $newProduitRepository;
     protected $data;
     protected $option;
 
@@ -135,8 +122,8 @@ class Scraping extends Controller
                 $imgsCrawler->each(function (Crawler $element, $i) {
                     $this->url[] = $element->getAttribute('src');
                 });
-                $this->param['gouvernorat'] = $this->getGouvernorat($arrayAdresse[0]);
-                $this->param['delegation'] = $this->getDelegation($arrayAdresse[1]);
+                $this->param['gouvernorat'] = $this->getGouvernorat(trim($arrayAdresse[0]));
+                $this->param['delegation'] = $this->getDelegation(trim($arrayAdresse[1]));
 
                 $paramsCrawler->each(function (Crawler $paramCrawler, $i) {
                     if ($paramCrawler->filter(".paramName")->getText() == 'Superficie') {
@@ -209,6 +196,9 @@ class Scraping extends Controller
             });
         } catch (\Exception $ex) {
             dump("Error: " . $ex->getMessage());
+            $this->client->quit();
+            $this->client = Client::createChromeClient(base_path($this->path), null, $this->options);
+
             //$this->pageDom($url);
         } finally {
         }
@@ -219,8 +209,6 @@ class Scraping extends Controller
     {
         $this->data = $data;
         set_time_limit(0);
-        $url = 'https://www.tayara.tn/ads/get/Voitures/617befec9273c5f7751bf498/Ford%20fiesta%20';
-        $this->pageDom($url);
         $urls = $this->globaleDom($data['url']);
         foreach ($urls as $key => $url) {
             dump($key);
@@ -259,13 +247,20 @@ class Scraping extends Controller
     public function getGouvernorat($gouvernorat)
     {
         switch ($gouvernorat) {
-            case 'Médenine':
-                return 'médenine ville';
+            case 'La Manouba':
+                return 'manouba';
                 break;
-            default:
-                return $gouvernorat;
+            case 'Béja':
+                return 'beja';
+                break;
+            case 'Médenine':
+                return 'medenine';
+                break;
+            case 'Gabès':
+                return 'gabes';
+                break;
         }
-
+        return $gouvernorat;
     }
     public function getDelegation($delegation)
     {
@@ -295,9 +290,12 @@ class Scraping extends Controller
                 return "le kef ouest";
                 break;
             case 'La Manouba':
-                return "mannouba";
+                return "manouba ville";
                 break;
             case 'Sfax':
+                return "sfax ville";
+                break;
+            case 'Sfax Médina':
                 return "sfax ville";
                 break;
             case 'Ariana':
@@ -309,13 +307,59 @@ class Scraping extends Controller
             case 'Sousse':
                 return "sousse ville";
                 break;
+            case 'Bizerte':
+                return "bizerte ville";
+                break;
             case 'Menzah':
                 return "el menzah";
                 break;
-            default:
-                return $delegation;
+            case 'Mohamedia':
+                return "mohamadia";
+                break;
+            case 'Ben Gardane':
+                return "ben guerdane";
+                break;
+            case 'Bir El Hafey':
+                return "bir el haffey";
+                break;
+            case 'Route Menzel Chaker':
+                return "menzel chaker";
+                break;
+            case 'Djerissa':
+                return "jerissa";
+                break;
+            case 'En Nadhour':
+                return "ennadhour";
+                break;
+            case 'Balta Bou Aouane':
+                return "balta bou aouene";
+                break;
+            case 'Béja':
+                return "beja ville";
+                break;
+            case 'Manar':
+                return "elmanar";
+                break;
+            case 'Médina':
+                return "la medina";
+                break;
+            case 'Djerba Houmt Souk':
+                return "djerba - houmet essouk";
+                break;
+            case 'Gafsa':
+                return "gafsa ville";
+                break;
+            case 'Lac 1':
+                return "les berges du lac";
+                break;
+            case 'Kairouan':
+                return "kairouan ville";
+                break;
+            case 'Ain Zaghouen':
+                return "ain zaghouan";
+                break;
         }
-
+        return $delegation;
     }
 
 }
