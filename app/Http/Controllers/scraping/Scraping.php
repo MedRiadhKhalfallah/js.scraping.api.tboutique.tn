@@ -22,7 +22,7 @@ class Scraping extends Controller
 
     public function __construct()
     {
-        $this->path = "drivers/tools/chromedriver"; //windows
+        $this->path = 'drivers\tools\chromedriver'; //windows
         // $this->path = "drivers/chromedriver"; // linux
 
         $_SERVER['PANTHER_NO_HEADLESS'] = false;
@@ -98,22 +98,29 @@ class Scraping extends Controller
             $crawler = $this->client->waitFor('.price');
             $this->param = [];
             $crawler->filter('body > app-root > div > app-ad-detail > div')->each(function (Crawler $parentCrawler, $i) {
-                $priceCrawler = $parentCrawler->filter("body > app-root > div > app-ad-detail > div > div.ad-detail.container > div.ad-detail-content > div.ad-detail-content-information.mt-3 > div.priceFavorite > div.price");
-                $titreCrawler = $parentCrawler->filter("body > app-root > div > app-ad-detail > div > div.ad-detail.container > div.ad-detail-content > div.ad-detail-content-information.mt-3 > div.title");
-                $adresseCrawler = $parentCrawler->filter("body > app-root > div > app-ad-detail > div > div.ad-detail.container > div.ad-detail-content > div.ad-detail-content-information.mt-3 > div.location > span.info");
-                $telCrawler = $parentCrawler->filter("body > app-root > div > app-ad-detail > div > div.ad-detail.container > div.ad-detail-content > div.ad-detail-content-information.mt-3 > div.communication > div.phoneBtn > button.mat-focus-indicator.phone.d-lg-none.mat-flat-button.mat-button-base.ng-star-inserted > span.mat-button-wrapper > a.w-100");
+                $priceCrawler = $parentCrawler->filter("div.price.mt-2.d-flex.justify-content-between.align-items-center");
+                $titreCrawler = $parentCrawler->filter("div.priceFavorite > div.name");
+                $adresseCrawler = $parentCrawler->filter(" div.mt-2.location.d-flex.align-items-center > span.info");
+                $telCrawler = $parentCrawler->filter("a.w-100");
                 $imgsCrawler = $parentCrawler->filter(".image.ratio.ng-star-inserted");
                 $paramsCrawler = $parentCrawler->filter(".params");
-                $descriptionCrawler = $parentCrawler->filter(".description.pt-5")->filter(".title");
+                $descriptionCrawler = $parentCrawler->filter("div.description.pt-5")->filter(".title");
 
                 $price = $priceCrawler->getText();
-                $this->param['prix'] = substr($price, 0, -3);
+
+                $this->param['prix'] = substr($price, 0, -19);
+
                 $titre = $titreCrawler->getText();
-                $this->param['titre'] = str_replace(array_keys($this->replace), $this->replace, $titre);
+
+                //$this->param['titre'] = str_replace(array_keys($this->replace), $this->replace, $titre);
+                $this->param['titre'] = $titre;
 
                 $description = $descriptionCrawler->getText();
+
                 $adresse = $adresseCrawler->getText();
+
                 $tel = $telCrawler->getAttribute('href');
+
                 $this->param['description'] = $description . " Adresse: $adresse  $tel";
                 $arrayAdresse = explode(',', $adresse);
                 $this->param['adresse'] = $adresse;
@@ -172,7 +179,6 @@ class Scraping extends Controller
 
                 });
 
-
                 $this->param['etat'] = 2;
                 $this->param['category_id'] = intval($this->data['category_id']);
                 $this->param['sous_category_id'] = intval($this->data['sous_category_id']);
@@ -184,7 +190,7 @@ class Scraping extends Controller
 
 
                 $this->param['societe_id'] = 1;
-                $this->param['user_id'] = 5;
+                $this->param['user_id'] = 1;
 
                 $this->param['image_name'] = $titre;
                 $this->param['image_path'] = $this->url[0];
